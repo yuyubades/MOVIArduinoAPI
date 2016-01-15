@@ -10,60 +10,31 @@
  ********************************************************************/
 
 #include "MOVIShield.h"
-#include <stream.h>
+#include "MOVIShield.h"
 
-#if defined(ARDUINO) && ARDUINO >=100
-#include <Arduino.h>
+#if defined(ARDUINO) && ARDUINO >= 100
+#include "arduino.h"
 #else
-#include <WProgram.h>
-#include <avr/pgmspace.h>
-#define F(str) (str)
+#include "WProgram.h"
 #endif
 
-#ifdef ARDUINO_ARCH_AVR
-#include <SoftwareSerial.h>
-#endif
+#include "WString.h"
 
-
-// This is a workaround to not have the MOVI API give warning messages about the use of the F() function.
-// It is explained here: https://github.com/arduino/Arduino/issues/1793
-#ifdef __GNUC__
-#ifndef GCC_VERSION
-#define GCC_VERSION (__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
-#endif
-#if GCC_VERSION < 40602 // Test for GCC < 4.6.2
-#ifdef PROGMEM
-#undef PROGMEM
-#define PROGMEM __attribute__((section(".progmem.data"))) // Workaround for http://gcc.gnu.org/bugzilla/show_bug.cgi?id=34734#c4
-#ifdef PSTR
-#undef PSTR
-#define PSTR(s) (__extension__({static const char __c[] PROGMEM = (s); &__c[0];})) // Copied from pgmspace.h in avr-libc source
-#endif
-#endif
-#endif
-#endif
+#include <pgmspace.h>
 
 MOVI::MOVI()
 {
-    construct(ARDUINO_RX_PIN, ARDUINO_TX_PIN, false);
+    construct(false);
 }
 
 MOVI::MOVI(bool debugonoff)
 {
-    construct(ARDUINO_RX_PIN, ARDUINO_TX_PIN, debugonoff);
-}
-
-MOVI::MOVI(bool debugonoff, int rx, int tx)
-{
-    #ifndef ARDUINO_ARCH_AVR
-    #warning rx and tx parameters only supported in AVR architecture. Using Serial1 hardwired. 
-    #endif
-    construct(rx, tx, debugonoff);
+    construct(debugonoff);
 }
 
 
-// Arduino's' C++ does not allow for constructor overloading!
-void inline MOVI::construct(int rx, int tx, bool debugonoff)
+// Arduino's C++ does not allow for constructor overloading!
+void inline MOVI::construct( bool debugonoff)
 {
     debug=debugonoff;
     shieldinit=0;
@@ -74,11 +45,7 @@ void inline MOVI::construct(int rx, int tx, bool debugonoff)
     firstsentence=true;
     callsigntrainok=true;
     
-    #ifdef ARDUINO_ARCH_AVR
-        mySerial=new SoftwareSerial(rx, tx);
-    #else
-        mySerial = &Serial1;
-    #endif
+    mySerial = &Serial;
 }
 
 void MOVI::init()
@@ -90,38 +57,29 @@ void MOVI::init(bool waitformovi)
 {
     if (shieldinit==0) {
         if (debug) {
-            Serial.begin(ARDUINO_BAUDRATE);
-            while (!Serial) {
-                ; // wait for serial port to connect. Needed for Leonardo only
-           }
+            Serial1.begin(DEBUG_SERIAL_BAUDRATE);
         }
-        mySerial->begin(ARDUINO_BAUDRATE);
+        mySerial->begin(SERIAL_BAUDRATE);
         shieldinit=1;
         while (waitformovi && !isReady()) {
             delay(10);
         }
         mySerial->println("INIT");
+		if (debug) {
+			Serial1.println("INIT");
+		}
         String sresponse=getShieldResponse();
         int s=sresponse.indexOf(": ");
         String ver=sresponse.substring(s+2);
         
-        // toFloat() didn't work for me. Ugly workarounds working around further bugs follow!
-        #ifdef __ARDUINO_X86__ // Intel can't do .c_str() either!
-        char carray[ver.length() + 1];
-        ver.toCharArray(carray, sizeof(carray));
-        firmwareversion = atof(carray);
-        #else                 // AVR, SAM
         firmwareversion=atof(ver.c_str());
-        #endif
+       
         s=sresponse.indexOf("@");
         ver=sresponse.substring(s+1);
-        #ifdef __ARDUINO_X86__   // Intel
-        char c2array[ver.length() + 1];
-        ver.toCharArray(c2array, sizeof(c2array));
-        hardwareversion = atof(c2array);
-        #else                    // AVR, SAm
         hardwareversion=atof(ver.c_str());
-        #endif
+		if (debug) {
+			Serial1.println("INIT DONE");
+		}
     }
     
 }
@@ -137,9 +95,13 @@ signed int MOVI::poll()
         curchar=mySerial->read();
         if (curchar=='\n') {
             if (debug) {
-                Serial.println(response);
+                Serial1.println(response);
             }
             if (response.indexOf("MOVIEvent[")>=0) {
+				if (debug) {
+					Serial1.print("poll resp MOVI: ");
+					Serial1.println(response);
+				}
                 eventno=response.substring(response.indexOf("[")+1,response.indexOf("]:")).toInt();
                 result=response.substring(response.indexOf(" ")+1);
                 if (eventno<100) { // then it's a user-read-only event
@@ -164,18 +126,23 @@ signed int MOVI::poll()
                 response="";
                 return -eventno;
             } else {
+				if (debug) {
+					Serial1.print("other jibberish not belonging to MOVI: ");
+					Serial1.println(response);
+				}
                 // other jibberish not belonging to MOVI
             }
         } else {
+			if (debug) {
+				//Serial1.print("APPENDING CHAR: ");
+				//Serial1.println((char) curchar);
+			}
             response+=(char) curchar;
         }
     }
-
-    if (debug) {
-        if (Serial.available()) {
-             mySerial->write(Serial.read());
-        }
-    }
+	else {
+		//Serial1.println("SHIELD DATA NOT AVAILABLE");
+	}
     
     return SHIELD_IDLE;
 }
@@ -190,6 +157,9 @@ String MOVI::getShieldResponse()
     String resp="";
     int curchar;
     if (shieldinit==0) {
+		if (debug) {
+			//Serial1.println("SHIELD NOT READY");
+		}
         init();
         return "";
     }
@@ -198,13 +168,30 @@ String MOVI::getShieldResponse()
         if (mySerial->available()) {
             curchar=mySerial->read();
             if (curchar=='\n') {
+				if (debug) {
+					Serial1.print("RESP: ");
+					Serial1.println(resp);
+				}
                 if (resp=="") continue;
                 return resp;
             } else {
+				if (debug) {
+					//Serial1.print("APPENDING CHAR: ");
+					//Serial1.println((char) curchar);
+				}
                 resp+=(char) curchar;
             }
         }
+		else {
+			if (debug) {
+				//Serial1.println("SHIELD DATA NOT AVAILABLE");
+			}
+		}
     }
+	
+	if (debug) {
+		//Serial1.println("SHIELD NOT READY");
+	}
     return "";
 }
 
@@ -212,6 +199,9 @@ bool MOVI::sendCommand(String command, String parameter, String okresponse)
 {
     if (isReady()) {
         mySerial->println(command+" "+parameter+"\n");
+        if (debug) {
+	        Serial1.println(command+" "+parameter+"\n");
+        }
         if (okresponse=="") return true;
         if (getShieldResponse().indexOf(okresponse)>=0) {
             return true;
@@ -227,6 +217,13 @@ bool MOVI::sendCommand(const __FlashStringHelper* command, const __FlashStringHe
         mySerial->print(" ");
         mySerial->print(parameter);
         mySerial->println("\n");
+		
+		if (debug) {
+			Serial1.print(command);
+			Serial1.print(" ");
+			Serial1.print(parameter);
+			Serial1.println("\n");
+		}
         if (okresponse=="") return true;
         if (getShieldResponse().indexOf(okresponse)>=0) {
             return true;
@@ -239,6 +236,9 @@ bool MOVI::sendCommand(const __FlashStringHelper* command, const __FlashStringHe
 void MOVI::sendCommand(String command, String parameter)
 {
     mySerial->println(command+" "+parameter+"\n");
+	if (debug) {
+		Serial1.println(command+" "+parameter+"\n");
+	}
 }
 
 #ifdef F // check to see if F() macro is available
@@ -248,6 +248,13 @@ void MOVI::sendCommand(const __FlashStringHelper* command, const __FlashStringHe
     mySerial->print(" ");
     mySerial->print(parameter);
     mySerial->println("\n");
+	
+	if (debug) {
+		Serial1.print(command);
+		Serial1.print(" ");
+		Serial1.print(parameter);
+		Serial1.println("\n");
+    }
 }
 #endif
 
@@ -260,6 +267,9 @@ bool MOVI::isReady()
         init();
     }
     mySerial->println("PING\n");
+	if (debug) {
+		Serial1.println("PING\n");
+	}
     if (getShieldResponse().indexOf("PONG")) {
         shieldinit=100;
         return true;

@@ -12,33 +12,24 @@
 #ifndef ____MOVIShield__
 #define ____MOVIShield__
 
-// Check for architecture
-#ifdef ARDUINO_ARCH_AVR // Arduino Uno, Mega, Leonardo, Yun, Duemillanova and clones (Freeduino, etc)
-#include <SoftwareSerial.h>
-#elif defined ARDUINO_ARCH_SAM // Arduino Due
-// Will use Serial1 later
-#elif defined __ARDUINO_X86__  // Intel Edison, Intel Galileo
-// Will user Serial1 later
-#elif defined ARDUINO_ARCH_SAMD  // Arduino Zero, Zero Pro, M0 and M0 Pro
-// Not supported right now
-#else                          // Old versions of the Arduino IDE that doesn't have ARCH destinctions yet.
-#include <SoftwareSerial.h>  
-#define ARDUINO_ARCH_AVR      // Assume AVR
+#if defined(ARDUINO) && ARDUINO >= 100
+#include "arduino.h"
+#else
+#include "WProgram.h"
 #endif
 
-#include "Arduino.h"
+#include <HardwareSerial.h>
 
-#ifndef ARDUINO_RX_PIN
-#define ARDUINO_RX_PIN 10  //  Arduino RX pin (default 10) needs to be connected to MOVI TX PIN
+
+#ifndef SERIAL_BAUDRATE
+#define SERIAL_BAUDRATE 9600  //  communication rate between MOVI and Arduino. 9600bps is good.
 #endif
 
-#ifndef ARDUINO_TX_PIN
-#define ARDUINO_TX_PIN 11  //  Arduino TX pin (default 11) needs to be connected to MOVI RX PIN
+#ifndef DEBUG_SERIAL_BAUDRATE
+#define DEBUG_SERIAL_BAUDRATE 115200  //  communication rate between MOVI and Arduino. 9600bps is good.
 #endif
 
-#ifndef ARDUINO_BAUDRATE
-#define ARDUINO_BAUDRATE 9600  //  communication rate between MOVI and Arduino. 9600bps is good.
-#endif
+
 
 
 // --- MOVI events ---
@@ -117,13 +108,13 @@ public:
     
     // Construct a MOVI object with optional serial monitor interaction.
     MOVI(bool debugonoff);
+	
+	void construct(bool debugonoff);
    
-    // Construct a MOVI object with different communication pins and optional serial monitor interaction. This constructor only works on AVR architecture CPU (e.g Arduino Uno, Mega, Leonardo. NOT Due, Zero, Edison)
-    MOVI(bool debugonoff, int rx, int tx);
-    
     // init waits for MOVI to be booted and resets some settings. If the recognizer had been stopped with
     // stopDialog() it is restarted.
     void init();
+	
     
     // This init method only initializes the API and doesn't wait for MOVI to be ready if the parameter is false.
     void init(bool waitformovi);
@@ -202,7 +193,7 @@ public:
     #endif
     
     // Makes MOVI speak the sentence given as first parameter. Then MOVI's password function is used to query for
-    // a password. The API comapres the passkey with the password and return either PASSWORD_REJECT or
+    // a password. The API compares the passkey with the password and return either PASSWORD_REJECT or
     // PASSWORD_ACCEPT as an event. The passkey is not transferred to or saved on the MOVI board.
     // IMPORTANT: The passkey must consist only of words contained in the trained sentences
     // and must not contain digits or other non-letter characters except one space between the words.
@@ -239,7 +230,7 @@ public:
     void restartDialog();
     
     // Resets MOVI to factory default. This method should only be used in setup() and only if needed. All trained
-    // sentences and callsigns are untrained. The preferrable method for a factory reset is to use the serial
+    // sentences and call signs are untrained. The preferable method for a factory reset is to use the serial
     // monitor.
     void factoryDefault();
     
@@ -258,15 +249,8 @@ private:
     void construct(int rx, int tx, bool debugonoff); // workaround for non-functioning constructor overloading
     String passstring;      // stores the passkey for a password() request
 
-#ifdef ARDUINO_ARCH_AVR
-    SoftwareSerial *mySerial; // serial communication line as SoftwareSerial for AVR CPUs (Uno, Mega, Leonardo,...)
-#elif defined ARDUINO_ARCH_SAM
-    USARTClass *mySerial; // serial communication line as USARTClass for SAM CPUs (Due, Zero)
-#elif defined __ARDUINO_X86__
-    TTYUARTClass *mySerial; // serial communication line as TTYUARTClass for Intel CPUs (Galileo, Edison)
-#else
-   #error This version of the MOVI API only supports boards with an AVR, SAM or Intel processor.
-#endif
+    HardwareSerial *mySerial; // serial communication line as HardwareSerial for writing and sending data to the movi shield;
+
     
     String response; // stores the stream of serial communication characters
     String result;   // stores the last result for getResult()
